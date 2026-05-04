@@ -581,6 +581,35 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-body);min-hei
 </nav>
 
 <script>
+
+  const DAILY_OBJECTIVES = [ ... ]; // Your list of goals
+let S = { ... }; // Your XP, Levels, and Logs
+
+// --- PART B: THE NEW CATCH-UP FUNCTIONS (PASTE HERE) ---
+function runMidnightCheck() {
+   // Paste the 'while' loop logic here...
+   // This calculates missed days while the tab was closed.
+}
+
+function isObjDoneEntry(obj, entry, dateStr) {
+   // Paste the fixed completion checker here...
+}
+
+// --- PART C: YOUR EXISTING UTILITIES (KEEP THESE) ---
+function save() { ... }
+function showPage(id) { ... }
+function addDays(dateStr, days) { ... }
+
+// --- PART D: THE APP STARTUP (REPLACE THIS) ---
+window.onload = () => {
+  runMidnightCheck(); // 1. Check for missed days first
+  showPage('home');    // 2. Then show the UI
+  refreshStats();     // 3. Update the XP bar
+  renderObjectives(); // 4. Show today's tasks
+  
+  // Keep the timer running while the tab IS open
+  setInterval(renderObjectives, 60000); 
+};
 // ═══════════════════════════════════════
 // CONSTANTS
 // ═══════════════════════════════════════
@@ -773,37 +802,72 @@ function getDayEntry(key) {
 
 function runMidnightCheck() {
   const today = todayKey();
-  const yesterday = addDays(today, -1);
-  if (S.lastMidnightCheck >= yesterday) return;
-  const yEntry = S.dailyLog[yesterday];
-  if (!yEntry) { S.lastMidnightCheck = yesterday; save(); return; }
-  let penalty = 0;
-  DAILY_OBJECTIVES.forEach(obj => {
-    const done = isObjDoneEntry(obj, yEntry, yesterday);
-    if (!done) { penalty += obj.penalty; S.totalXPLost += obj.penalty; S.totalObjMissed++; }
-    else { S.totalObjCompleted++; }
-  });
-  if (penalty > 0) {
-    S.totalXP = Math.max(0, S.totalXP - penalty);
-    setTimeout(()=>showToast(`-${penalty} XP — missed yesterday's objectives`, true), 800);
+  
+  // 1. Get the last date the app processed penalties
+  let lastCheck = S.lastMidnightCheck || addDays(today, -1);
+  
+  // 2. Loop through every day between the last check and today
+  while (lastCheck < today) {
+    const checkDate = lastCheck;
+    const entry = S.dailyLog[checkDate];
+    let dailyPenalty = 0;
+
+    // Only penalize if the day actually exists in logs or if it's a gap
+    DAILY_OBJECTIVES.forEach(obj => {
+      const done = isObjDoneEntry(obj, entry, checkDate);
+      if (!done) {
+        dailyPenalty += obj.penalty;
+        S.totalXPLost += obj.penalty;
+        S.totalObjMissed++;
+      } else {
+        S.totalObjCompleted++;
+      }
+    });
+
+    if (dailyPenalty > 0) {
+      S.totalXP = Math.max(0, S.totalXP - dailyPenalty);
+      // We'll show a combined toast later or one per missed day
+      console.log(`Applied -${dailyPenalty} XP penalty for ${checkDate}`);
+    }
+
+    // Move to the next day in the sequence
+    lastCheck = addDays(lastCheck, 1);
   }
-  S.lastMidnightCheck = yesterday;
+
+  // 3. Update the state so we don't penalize the same days again
+  S.lastMidnightCheck = today;
   save();
+  
+  // Refresh UI to show the new (lower) XP
+  refreshStats();
+  renderObjectives();
 }
 
+// Update the isObjDoneEntry to handle null entries (days you didn't open the app)
 function isObjDoneEntry(obj, entry, dateStr) {
-  if (!entry) return false;
+  if (!entry) return false; // If you never opened the app, you definitely didn't finish objectives
   const c = entry.objCompleted || [];
+  
   if (c.includes(obj.id)) return true;
-  if (obj.type==='pushup') { const t=getPushupTarget(dateStr); return t===0?entry.restDayLogged:entry.pushups!==null&&entry.pushups>=(t||0); }
-  if (obj.type==='meal_b') return entry.breakfast;
-  if (obj.type==='meal_l') return entry.lunch;
-  if (obj.type==='meal_d') return entry.dinner;
-  if (obj.type==='fruit') return entry.fruit;
+  
+  // Special logic for pushups (checking reps vs target)
+  if (obj.type === 'pushup') {
+    const t = getPushupTarget(dateStr);
+    return t === 0 ? entry.restDayLogged : (entry.pushups !== null && entry.pushups >= (t || 0));
+  }
+  
+  // Manual toggle checks
+  if (obj.type === 'meal_b') return entry.breakfast;
+  if (obj.type === 'meal_l') return entry.lunch;
+  if (obj.type === 'meal_d') return entry.dinner;
+  if (obj.type === 'fruit') return entry.fruit;
+  if (obj.type === 'anti') {
+      // For anti-habits, they are "done" only if you explicitly checked them 
+      // as successful. If the entry exists but it's not checked, it's a fail.
+      return c.includes(obj.id);
+  }
   return false;
 }
-function isObjDoneToday(obj) { return isObjDoneEntry(obj, getDayEntry(todayKey()), todayKey()); }
-
 // ═══════════════════════════════════════
 // RANK
 // ═══════════════════════════════════════
